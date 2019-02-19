@@ -11,6 +11,7 @@ html {
 }
 
 .wrap {
+  position: relative;
   display: grid;
   width: 424px;
   height: 424px;
