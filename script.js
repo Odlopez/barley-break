@@ -6,6 +6,7 @@
 
   const GRID_GAP = parseInt(getComputedStyle(root).getPropertyValue('--gap'));
   const DURATION = 500;
+  const CLICK_TIME = 300;
   const TOUCH_COEFFICIENT = 1.3;
   
   const AREAS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
@@ -72,6 +73,7 @@
         bottom: 12,
         left: null
       };
+      this.activeChip = null;
       // this.onFlieldClick = this.onFlieldClick.bind(this);
       this.onFlieldMousedown = this.onFlieldMousedown.bind(this);
       this.onFlieldTouchstart = this.onFlieldTouchstart.bind(this);
@@ -145,14 +147,14 @@
      * В конце движения фишки, меняет местами данные о положения вакуума и сыгравшей фишки, сбрасывает стили для скольжения, сменяет grid-позицию в области
      * @param {Node} elem 
      */
-    completeMove(elem) {
+    completeMove(elem, duration) {
       [this.vacuum, this.chipsData.get(elem).area] = [this.chipsData.get(elem).area, this.vacuum];
 
       setTimeout(() => {
         elem.style.transition = ``;
         elem.style.transform = ``;
         elem.style.gridArea = this.getAreaLetter(this.chipsData.get(elem).area);
-      }, DURATION);
+      }, duration);
     };
 
     /**
@@ -160,7 +162,8 @@
      * @param {String} direction 
      * @param {Node} elem 
      */
-    runMove(direction, elem, duration = DURATION, distance = elem.clientHeight + GRID_GAP) {
+    runMove(direction, elem, duration = DURATION, distance = elem.clientHeight + GRID_GAP, isReverse = false) {
+      this.activeChip = elem;
       elem.style.transition = `all 0.1s linear, transform ${(duration / 1000).toFixed(2)}s ease`;
       switch (direction) {
         case `top`:
@@ -183,8 +186,14 @@
           break;
       }
       
-      this.completeMove(elem);
-      this.writeDirections();
+      if (!isReverse) {
+        this.completeMove(elem, duration);
+        this.writeDirections();
+      }
+
+      setTimeout(() => {
+        this.activeChip = null;
+      }, duration);
     };
 
     /**
@@ -196,13 +205,13 @@
 
       const self = this;
       const chip = e.target.closest('.el');
+      const startTime = performance.now();
       let bias = 0;
-      let previosX = e.clientX;
-      let previosY = e.clientY;
+      let reverseRoute;
       let chipData;
       let factor;
 
-      if (!chip) {
+      if (!chip || this.activeChip === chip) {
         return;
       }
 
@@ -233,33 +242,30 @@
       };
 
       const onChipMousemove = function (moveEvt) {
+        // определяем на какое свойство события нам следует смотреть: movementY или movementX
         const direction = chipData.direction === 'top' || chipData.direction === 'bottom' ? 'movementY' : 'movementX';
+
+        // определяем какое свойство transform нам поднадобится
         let translateProperty = direction === 'movementX' ? 'translateX' : 'translateY';
+
+        // определяем коэффециент для математических операций с координатами смещения
         factor = chipData.direction === 'top' || chipData.direction === 'left' ? -1 : 1;
 
-        // Если мышка движется не в разрешенном направлении - прерываем функцию
-        if (moveEvt[direction] * factor <= 0) {
-          return;
-        }
-
-        // Если передвинулась "выше" стартовой позиции - прерываем функцию
-        if (direction === 'movementX' && (moveEvt.clientX - previosX) * factor <= 0) {
-          return;
-        } else if (direction === 'movementY' && (moveEvt.clientY - previosY) * factor <= 0) {
-          return;
-        }
 
         if (direction === 'movementX') {
+          // определяем обратное направление движения
+          reverseRoute = (moveEvt.clientX - shift.x) * factor > end.x * factor && factor > 0 ? 'right' : 'left';
+
           end.x = moveEvt.clientX - shift.x;
           bias = end.x - start.x;
-          previosX = moveEvt.clientX;
         } else {
+          reverseRoute = (moveEvt.clientY - shift.y) * factor > end.y * factor && factor > 0 ? 'bottom' : 'top';
           end.y = moveEvt.clientY - shift.y;
           bias = end.y - start.y;
-          previosY = moveEvt.clientY;
         }
-
-        if (Math.abs(bias) > chip.clientHeight + GRID_GAP) {
+        
+        // Если фишка заезжает слишком далеко вперед или слишком далеко назад - прерываем функцию
+        if (Math.abs(bias) > chip.clientHeight + GRID_GAP || bias * factor <= 0) {
           return;
         }
 
@@ -267,8 +273,18 @@
       }
 
       const onChipMouseup = function () {
-        const restDuration =  (1 - Math.abs(bias) / (chip.clientHeight + GRID_GAP)) * DURATION;
-        self.runMove(chipData.direction, chip, restDuration);
+        // определяем смещение фишки не от положения мышки, а от свойства transform на фишке
+        bias = parseInt(chip.style.transform.slice(11)) || 0;
+
+        // вычисляем время анимации движения мышки пропорционально оставшегося пути
+        const restDuration = (1 - Math.abs(bias) / (chip.clientHeight + GRID_GAP)) * DURATION;
+
+        // Если передвинули фишку назад и при этом назад ей лететь ближе, чем вперед, и событие длилось дольше, чем CLICK_TIME, тогда отменяем движение вперед, иначе - обычный запуск движения фишки
+        if (reverseRoute !== chipData.direction && bias * factor < (chip.clientHeight + GRID_GAP) / 2 && performance.now() - startTime > CLICK_TIME) {
+          self.runMove(reverseRoute, chip, restDuration, 0, true);
+        } else {
+          self.runMove(chipData.direction, chip, restDuration);
+        }
 
         document.removeEventListener('mousemove', onChipMousemove);
         document.removeEventListener('mouseup', onChipMouseup);
@@ -287,13 +303,13 @@
 
       const self = this;
       const chip = e.target.closest('.el');
+      const startTime = performance.now();
       let bias = 0;
+      let reverseRoute;
       let chipData;
       let factor;
-      let previosPointX = e.changedTouches[0].pageX;
-      let previosPointY = e.changedTouches[0].pageY;
 
-      if (!chip) {
+      if (!chip || this.activeChip === chip) {
         return;
       }
 
@@ -327,24 +343,18 @@
         const direction = chipData.direction === 'top' || chipData.direction === 'bottom' ? 'movementY' : 'movementX';
         let translateProperty = direction === 'movementX' ? 'translateX' : 'translateY';
         factor = chipData.direction === 'top' || chipData.direction === 'left' ? -1 : 1;
-
-        if (direction === 'movementX' && (moveEvt.changedTouches[0].pageX - previosPointX) * factor <= 0) {
-          return;
-        } else if(direction === 'movementY' && (moveEvt.changedTouches[0].pageY - previosPointY) * factor <= 0) {
-          return;
-        }
-        
+      
         if (direction === 'movementX') {
+          reverseRoute = (moveEvt.changedTouches[0].pageX - shift.x) * factor > end.x * factor && factor > 0 ? 'right' : 'left';
           end.x = moveEvt.changedTouches[0].pageX - shift.x;
           bias = end.x - start.x;
-          previosPointX = moveEvt.changedTouches[0].pageX;
         } else {
+          reverseRoute = (moveEvt.changedTouches[0].pageY - shift.y) * factor > end.y * factor && factor > 0 ? 'bottom' : 'top';
           end.y = moveEvt.changedTouches[0].pageY - shift.y;
           bias = end.y - start.y;
-          previosPointY = moveEvt.changedTouches[0].pageY;
         }
 
-        if (Math.abs(bias) > chip.clientHeight + GRID_GAP) {
+        if (Math.abs(bias) > chip.clientHeight + GRID_GAP || bias * factor <= 0) {
           return;
         }
 
@@ -352,7 +362,16 @@
       }
 
       const onChipTouchend = function () {
-        self.runMove(chipData.direction, chip, DURATION / TOUCH_COEFFICIENT);
+        bias = parseInt(chip.style.transform.slice(11)) || 0;
+
+        const restDuration = (1 - Math.abs(bias) / (chip.clientHeight + GRID_GAP)) * DURATION;
+
+
+        if (reverseRoute !== chipData.direction && bias * factor < (chip.clientHeight + GRID_GAP) / 1.25 && performance.now() - startTime > CLICK_TIME) {
+          self.runMove(reverseRoute, chip, restDuration / TOUCH_COEFFICIENT, 0, true);
+        } else {
+          self.runMove(chipData.direction, chip, restDuration / TOUCH_COEFFICIENT);
+        }
 
         document.removeEventListener('touchmove', onChipTouchmove);
         document.removeEventListener('touchend', onChipTouchend);
@@ -373,7 +392,6 @@
       
       this.vacuum = 16;
       this.writeDirections();
-      // this.field.addEventListener(`click`, this.onFlieldClick);
       this.field.addEventListener(`mousedown`, this.onFlieldMousedown);
       this.field.addEventListener(`touchstart`, this.onFlieldTouchstart);
     };
