@@ -197,6 +197,8 @@
       const self = this;
       const chip = e.target.closest('.el');
       let bias = 0;
+      let previosX = e.clientX;
+      let previosY = e.clientY;
       let chipData;
       let factor;
 
@@ -235,17 +237,26 @@
         let translateProperty = direction === 'movementX' ? 'translateX' : 'translateY';
         factor = chipData.direction === 'top' || chipData.direction === 'left' ? -1 : 1;
 
-
+        // Если мышка движется не в разрешенном направлении - прерываем функцию
         if (moveEvt[direction] * factor <= 0) {
+          return;
+        }
+
+        // Если передвинулась "выше" стартовой позиции - прерываем функцию
+        if (direction === 'movementX' && (moveEvt.clientX - previosX) * factor <= 0) {
+          return;
+        } else if (direction === 'movementY' && (moveEvt.clientY - previosY) * factor <= 0) {
           return;
         }
 
         if (direction === 'movementX') {
           end.x = moveEvt.clientX - shift.x;
           bias = end.x - start.x;
+          previosX = moveEvt.clientX;
         } else {
           end.y = moveEvt.clientY - shift.y;
           bias = end.y - start.y;
+          previosY = moveEvt.clientY;
         }
 
         if (Math.abs(bias) > chip.clientHeight + GRID_GAP) {
@@ -317,12 +328,12 @@
         let translateProperty = direction === 'movementX' ? 'translateX' : 'translateY';
         factor = chipData.direction === 'top' || chipData.direction === 'left' ? -1 : 1;
 
-        if (direction === 'movementY' && (moveEvt.changedTouches[0].pageY - previosPointY) * factor <= 0 ) {
+        if (direction === 'movementX' && (moveEvt.changedTouches[0].pageX - previosPointX) * factor <= 0) {
           return;
-        } else if(direction === 'movementX' && (moveEvt.changedTouches[0].pageX - previosPointX) * factor <= 0 ) {
+        } else if(direction === 'movementY' && (moveEvt.changedTouches[0].pageY - previosPointY) * factor <= 0) {
           return;
         }
-
+        
         if (direction === 'movementX') {
           end.x = moveEvt.changedTouches[0].pageX - shift.x;
           bias = end.x - start.x;
